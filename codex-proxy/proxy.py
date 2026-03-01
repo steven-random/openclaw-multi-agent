@@ -32,14 +32,11 @@ NOISE = [
 ]
 
 # Agent workspace mapping: keywords in system message → workspace path
-# These keywords appear in each agent's AGENTS.md / system prompt, so the proxy can
-# identify which agent is calling and set the correct cwd for `codex exec`.
-# Customize this list to match your own agent workspace setup.
 AGENT_WORKSPACES = [
-    (["email_ops.py", "yahoo mail", "imap", "smtp"], "/home/YOUR_USER/clawd-email"),
-    (["美股", "stock analyst", "股市", "etf", "earnings", "pe ratio"], "/home/YOUR_USER/clawd-stock"),
+    (["email_ops.py", "yahoo mail", "imap", "smtp", "stevenwuziyuan"], "/home/steven/clawd-email"),
+    (["美股", "stock analyst", "股市", "etf", "earnings", "pe ratio"],  "/home/steven/clawd-stock"),
 ]
-DEFAULT_WORKSPACE = "/home/YOUR_USER/clawd"
+DEFAULT_WORKSPACE = "/home/steven/clawd"
 
 
 def detect_workspace(messages: list[dict]) -> str:
@@ -82,7 +79,7 @@ def build_prompt(messages: list[dict]) -> str:
 async def run_codex(prompt: str, workspace: str) -> str:
     """Run codex exec and return cleaned output text."""
     proc = await asyncio.create_subprocess_exec(
-        "/home/YOUR_USER/.npm-global/bin/codex", "exec",
+        "/home/steven/.npm-global/bin/codex", "exec",
         "--model", "gpt-5.3-codex",
         "-s", "danger-full-access",
         "--skip-git-repo-check",

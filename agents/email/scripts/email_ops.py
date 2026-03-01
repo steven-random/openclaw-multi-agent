@@ -6,11 +6,13 @@ Usage: python email_ops.py <command> [options]
 Credentials read from environment variables:
   EMAIL_ADDRESS, EMAIL_APP_PASSWORD, IMAP_HOST, IMAP_PORT, SMTP_HOST, SMTP_PORT
 """
-import os, sys, imaplib, smtplib, email, argparse
+import os, sys, imaplib, smtplib, email, argparse, re
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.header import decode_header
-from datetime import datetime
+from email.utils import parsedate_to_datetime, parseaddr
+from html import unescape
+from pathlib import Path
 
 # ── Credentials ────────────────────────────────────────────────────────────
 # Auto-load .env from the same directory as this script
@@ -221,6 +223,212 @@ def cmd_flag(args):
     imap.logout()
 
 
+def _safe_filename_part(value, fallback="unknown"):
+    value = (value or "").strip().lower()
+    value = re.sub(r"[^a-z0-9._-]+", "_", value)
+    value = re.sub(r"_+", "_", value).strip("._-")
+    return value or fallback
+
+
+def _extract_text_body(msg):
+    chunks = []
+    if msg.is_multipart():
+        for part in msg.walk():
+            ctype = part.get_content_type()
+            disp = (part.get("Content-Disposition") or "").lower()
+            if "attachment" in disp:
+                continue
+            if ctype in ("text/plain", "text/html"):
+                payload = part.get_payload(decode=True) or b""
+                charset = part.get_content_charset() or "utf-8"
+                try:
+                    text = payload.decode(charset, errors="replace")
+                except LookupError:
+                    text = payload.decode("utf-8", errors="replace")
+                chunks.append(text)
+    else:
+        payload = msg.get_payload(decode=True) or b""
+        charset = msg.get_content_charset() or "utf-8"
+        try:
+            chunks.append(payload.decode(charset, errors="replace"))
+        except LookupError:
+            chunks.append(payload.decode("utf-8", errors="replace"))
+
+    text = "\n".join(chunks)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = unescape(text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def _extract_date_yyyy_mm_dd(msg):
+    raw_date = msg.get("Date", "")
+    if not raw_date:
+        return "Unknown"
+    try:
+        dt = parsedate_to_datetime(raw_date)
+        return dt.date().isoformat()
+    except Exception:
+        return "Unknown"
+
+
+def _extract_vendor(msg):
+    raw_from = decode_str(msg.get("From", ""))
+    name, addr = parseaddr(raw_from)
+    vendor = name.strip() or (addr.split("@")[0] if addr else "")
+    return vendor or "Unknown"
+
+
+def _extract_amount_currency(text):
+    if not text:
+        return ("Unknown", "Unknown")
+
+    sym_map = {"$": "USD", "€": "EUR", "£": "GBP", "¥": "JPY"}
+    # e.g. USD 12.34 / 12.34 USD / $12.34
+    patterns = [
+        r"\b(USD|EUR|GBP|JPY|CNY|RMB|HKD|SGD|AUD|CAD)\s*([0-9]+(?:[.,][0-9]{2})?)\b",
+        r"\b([0-9]+(?:[.,][0-9]{2})?)\s*(USD|EUR|GBP|JPY|CNY|RMB|HKD|SGD|AUD|CAD)\b",
+        r"([$€£¥])\s*([0-9]+(?:[.,][0-9]{2})?)",
+    ]
+    for p in patterns:
+        m = re.search(p, text, re.IGNORECASE)
+        if not m:
+            continue
+        g1, g2 = m.group(1), m.group(2)
+        if g1 in sym_map:
+            return (g2.replace(",", ""), sym_map[g1])
+        if re.match(r"^[A-Za-z]{3}$", g1):
+            return (g2.replace(",", ""), g1.upper())
+        return (g1.replace(",", ""), g2.upper())
+    return ("Unknown", "Unknown")
+
+
+def _extract_invoice_number(text, subject):
+    hay = f"{subject} {text}".strip()
+    patterns = [
+        r"\b(?:invoice|receipt|order|transaction|payment)\s*(?:number|no|#)?\s*[:#-]?\s*([A-Za-z0-9-]{4,})\b",
+        r"\b(?:inv|txn|ord)[-_ ]?([A-Za-z0-9-]{4,})\b",
+    ]
+    for p in patterns:
+        m = re.search(p, hay, re.IGNORECASE)
+        if m:
+            return m.group(1)
+    return "Unknown"
+
+
+def _classify_category(subject, text):
+    hay = f"{subject} {text}".lower()
+    rules = [
+        ("travel", ["airline", "hotel", "booking", "trip", "flight", "train", "uber", "lyft"]),
+        ("software", ["software", "license", "github", "openai", "aws", "gcp", "azure", "domain"]),
+        ("shopping", ["order", "shipped", "store", "shop", "amazon", "taobao", "ebay"]),
+        ("subscription", ["subscription", "renewal", "monthly", "yearly", "plan"]),
+        ("utilities", ["electricity", "water", "gas", "internet", "phone bill", "utility"]),
+    ]
+    for cat, words in rules:
+        if any(w in hay for w in words):
+            return cat
+    return "other"
+
+
+def _is_receipt_mail(subject, text):
+    hay = f"{subject} {text}".lower()
+    keys = ["invoice", "receipt", "payment confirmation", "payment received", "paid"]
+    return any(k in hay for k in keys)
+
+
+def _raw_excerpt(text):
+    if not text:
+        return "Unknown"
+    parts = re.split(r"(?<=[.!?])\s+", text)
+    key_parts = []
+    for p in parts:
+        low = p.lower()
+        if any(k in low for k in ["invoice", "receipt", "payment", "paid", "amount", "total"]):
+            key_parts.append(p.strip())
+        if len(key_parts) >= 3:
+            break
+    if not key_parts:
+        key_parts = parts[:2]
+    excerpt = " ".join(key_parts).strip()
+    return excerpt[:800] if excerpt else "Unknown"
+
+
+def cmd_scan_receipts(args):
+    imap = imap_connect()
+    folder = args.folder or "INBOX"
+    imap.select(f'"{folder}"', readonly=True)
+    _, data = imap.uid("SEARCH", None, "ALL")
+    uids = data[0].split()
+    uids = uids[-args.limit:]
+
+    receipts_dir = Path(args.output_dir)
+    receipts_dir.mkdir(parents=True, exist_ok=True)
+
+    if not uids:
+        print("Status: Ignored")
+        imap.logout()
+        return
+
+    for uid in uids:
+        status, msg_data = imap.uid("FETCH", uid, "(RFC822)")
+        if status != "OK" or not msg_data or not isinstance(msg_data[0], tuple):
+            print("Status: Ignored")
+            continue
+
+        msg = email.message_from_bytes(msg_data[0][1])
+        subject = decode_str(msg.get("Subject", ""))
+        text = _extract_text_body(msg)
+
+        if not _is_receipt_mail(subject, text):
+            print("Status: Ignored")
+            continue
+
+        date_val = _extract_date_yyyy_mm_dd(msg)
+        vendor = _extract_vendor(msg)
+        amount, currency = _extract_amount_currency(text)
+        invoice_no = _extract_invoice_number(text, subject)
+        category = _classify_category(subject, text)
+
+        safe_vendor = _safe_filename_part(vendor, "unknown_vendor")
+        safe_inv = _safe_filename_part(invoice_no, "unknown_invoice")
+        safe_date = date_val if re.match(r"^\d{4}-\d{2}-\d{2}$", date_val) else "unknown-date"
+        out_file = receipts_dir / f"{safe_date}_{safe_vendor}_{safe_inv}.md"
+
+        if out_file.exists():
+            print("Status: Duplicate")
+            continue
+
+        summary = f"{vendor} 的一笔 {amount} {currency} 消费记录。"
+        excerpt = _raw_excerpt(text)
+
+        vendor_out = vendor if vendor else "Unknown"
+        amount_out = amount if amount else "Unknown"
+        currency_out = currency if currency else "Unknown"
+        invoice_out = invoice_no if invoice_no else "Unknown"
+        date_out = date_val if date_val else "Unknown"
+        category_out = category if category else "Unknown"
+
+        content = (
+            f"# Receipt - {vendor_out}\n\n"
+            f"- Date: {date_out}\n"
+            f"- Vendor: {vendor_out}\n"
+            f"- Amount: {amount_out} {currency_out}\n"
+            f"- Invoice Number: {invoice_out}\n"
+            f"- Category: {category_out}\n\n"
+            f"---\n\n"
+            f"## Summary\n\n"
+            f"{summary}\n\n"
+            f"---\n\n"
+            f"## Raw Email Excerpt\n\n"
+            f"{excerpt}\n"
+        )
+        out_file.write_text(content, encoding="utf-8")
+        print("Status: Saved")
+
+    imap.logout()
+
+
 def main():
     if not EMAIL_ADDR or not EMAIL_PASS:
         print("❌ 缺少邮箱凭据，请设置环境变量：EMAIL_ADDRESS, EMAIL_APP_PASSWORD")
@@ -254,13 +462,25 @@ def main():
     p_flag.add_argument("--uid", required=True, type=int)
     p_flag.add_argument("--flag", required=True, choices=["seen", "unseen"])
 
+    # scan-receipts
+    p_scan = sub.add_parser("scan-receipts", help="扫描并提取收据邮件")
+    p_scan.add_argument("--limit", type=int, default=20, help="扫描最近 N 封邮件")
+    p_scan.add_argument("--folder", default="INBOX", help="扫描文件夹")
+    p_scan.add_argument("--output-dir", default="./receipts", help="输出目录")
+
     args = parser.parse_args()
     if not args.cmd:
         parser.print_help()
         sys.exit(1)
 
-    cmds = {"list": cmd_list, "search": cmd_search, "send": cmd_send,
-            "move": cmd_move, "flag": cmd_flag}
+    cmds = {
+        "list": cmd_list,
+        "search": cmd_search,
+        "send": cmd_send,
+        "move": cmd_move,
+        "flag": cmd_flag,
+        "scan-receipts": cmd_scan_receipts,
+    }
     cmds[args.cmd](args)
 
 
