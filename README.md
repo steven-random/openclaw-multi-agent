@@ -1,4 +1,4 @@
-# openclawd-multi-agent
+# openclaw-multi-agent
 
 A production-grade, per-channel Slack multi-agent system built on [OpenClaw](https://openclaw.dev) native capabilities — no custom routing code, no glue layer.
 
@@ -36,13 +36,13 @@ Each Slack channel gets its own isolated AI agent with independent long-term mem
 Slack Workspace (single Bot, Socket Mode)
 │
 ├── #email-agent  ──→  Agent "email"
-│                      workspace:  ~/clawd-email/
+│                      workspace:  ~/claw-email/
 │                      memory:     ~/.openclaw/memory/email.sqlite
 │                      tools:      exec(allowlist) + fs(workspaceOnly)
 │                                  ✗ db_query  ✗ web_search
 │
 └── #stock-agent  ──→  Agent "stock"
-                       workspace:  ~/clawd-stock/
+                       workspace:  ~/claw-stock/
                        memory:     ~/.openclaw/memory/stock.sqlite
                        tools:      web_search + web_fetch + fs(workspaceOnly)
                                    ✗ exec  ✗ db_query
@@ -80,7 +80,7 @@ FastAPI bridge: OpenClaw's OpenAI-compatible calls → `codex exec` CLI
 ## Project structure
 
 ```
-openclawd-multi-agent/
+openclaw-multi-agent/
 ├── README.md
 ├── .gitignore
 │
@@ -146,8 +146,8 @@ openclawd-multi-agent/
 ### 1. Clone
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/openclawd-multi-agent.git
-cd openclawd-multi-agent
+git clone https://github.com/YOUR_USERNAME/openclaw-multi-agent.git
+cd openclaw-multi-agent
 ```
 
 ### 2. Install OpenClaw and Codex
@@ -169,17 +169,17 @@ Edit `proxy.py` — replace `YOUR_USER` with your Linux username in `AGENT_WORKS
 
 ```bash
 # Email agent
-mkdir ~/clawd-email
-cp -r agents/email/* ~/clawd-email/
-cp agents/email/scripts/.env.example ~/clawd-email/scripts/.env
-nano ~/clawd-email/scripts/.env      # fill in real credentials
+mkdir ~/claw-email
+cp -r agents/email/* ~/claw-email/
+cp agents/email/scripts/.env.example ~/claw-email/scripts/.env
+nano ~/claw-email/scripts/.env      # fill in real credentials
 
 # Stock agent
-mkdir ~/clawd-stock
-cp -r agents/stock/* ~/clawd-stock/
+mkdir ~/claw-stock
+cp -r agents/stock/* ~/claw-stock/
 
 # Memory dirs (required by OpenClaw memory search)
-mkdir -p ~/clawd-email/memory ~/clawd-stock/memory
+mkdir -p ~/claw-email/memory ~/claw-stock/memory
 ```
 
 ### 5. Configure OpenClaw
@@ -269,7 +269,7 @@ openclaw plugins list
 | `gateway.auth.token` | Local gateway token — `openssl rand -hex 24` |
 | `plugins.entries.db-tool.config` | PostgreSQL connection details |
 
-### `~/clawd-email/scripts/.env` — secrets (never commit)
+### `~/claw-email/scripts/.env` — secrets (never commit)
 
 | Variable | Description |
 |----------|-------------|
@@ -338,8 +338,8 @@ ls ~/.openclaw/memory/
 
 2. **Create workspace**
    ```bash
-   mkdir ~/clawd-myagent && mkdir -p ~/clawd-myagent/memory
-   cp -r agents/email/* ~/clawd-myagent/
+   mkdir ~/claw-myagent && mkdir -p ~/claw-myagent/memory
+   cp -r agents/email/* ~/claw-myagent/
    # Edit AGENTS.md to define the new agent's role
    ```
 
@@ -349,7 +349,7 @@ ls ~/.openclaw/memory/
    // agents.list[]
    {
      "id": "myagent",
-     "workspace": "/home/YOUR_USER/clawd-myagent",
+     "workspace": "/home/YOUR_USER/claw-myagent",
      "model": { "primary": "codex/gpt-5.3-codex" },
      "tools": {
        "fs": { "workspaceOnly": true },

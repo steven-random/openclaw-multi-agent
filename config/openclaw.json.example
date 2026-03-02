@@ -24,7 +24,7 @@
       "model": {
         "primary": "codex/gpt-5.3-codex"
       },
-      "workspace": "/home/YOUR_USER/clawd",
+      "workspace": "/home/YOUR_USER/claw",
       "maxConcurrent": 4,
       "subagents": {
         "maxConcurrent": 8
@@ -41,7 +41,7 @@
       {
         "id": "email",
         "name": "Email Agent",
-        "workspace": "/home/YOUR_USER/clawd-email",
+        "workspace": "/home/YOUR_USER/claw-email",
         "model": { "primary": "codex/gpt-5.3-codex" },
         "tools": {
           "fs": { "workspaceOnly": true },
@@ -51,7 +51,7 @@
       {
         "id": "stock",
         "name": "Stock Analyst",
-        "workspace": "/home/YOUR_USER/clawd-stock",
+        "workspace": "/home/YOUR_USER/claw-stock",
         "model": { "primary": "codex/gpt-5.3-codex" },
         "tools": {
           "fs": { "workspaceOnly": true },

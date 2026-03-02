@@ -33,10 +33,10 @@ NOISE = [
 
 # Agent workspace mapping: keywords in system message → workspace path
 AGENT_WORKSPACES = [
-    (["email_ops.py", "yahoo mail", "imap", "smtp", "stevenwuziyuan"], "/home/steven/clawd-email"),
-    (["美股", "stock analyst", "股市", "etf", "earnings", "pe ratio"],  "/home/steven/clawd-stock"),
+    (["email_ops.py", "yahoo mail", "imap", "smtp", "stevenwuziyuan"], "/home/steven/claw-email"),
+    (["美股", "stock analyst", "股市", "etf", "earnings", "pe ratio"],  "/home/steven/claw-stock"),
 ]
-DEFAULT_WORKSPACE = "/home/steven/clawd"
+DEFAULT_WORKSPACE = "/home/steven/claw"
 
 
 def detect_workspace(messages: list[dict]) -> str:
